@@ -6,7 +6,8 @@ async function request(path, options = {}) {
   try {
     res = await fetch(`${BASE}/api${path}`, options)
   } catch {
-    throw new Error('Cannot reach the backend. Is the Python server running on port 8000?')
+    const target = BASE || `${window.location.origin} (VITE_API_URL is not set)`
+    throw new Error(`Cannot reach the backend at ${target}. It may be waking up, try again in a minute.`)
   }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
