@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import useCamera from '../hooks/useCamera'
 import { BoxLayer } from './FaceOverlay'
+import { usePopup } from './Popup'
 
 const FRAME_GAP_MS = 600 // pause between frames so the CPU isn't pinned
 
@@ -11,7 +12,7 @@ export default function LivePanel({ peopleCount, goToPeople, onAttendance }) {
   const [attendance, setAttendance] = useState(true)
   const [result, setResult] = useState(null)
   const [latency, setLatency] = useState(null)
-  const [error, setError] = useState('')
+  const popup = usePopup()
   const [log, setLog] = useState([])
   const attendanceRef = useRef(attendance)
   attendanceRef.current = attendance
@@ -32,25 +33,26 @@ export default function LivePanel({ peopleCount, goToPeople, onAttendance }) {
           if (cancelled) return
           setResult(res)
           setLatency(Math.round(performance.now() - started))
-          setError('')
           if (res.attendance_marked.length) {
             const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
             setLog((l) => [...res.attendance_marked.map((name) => ({ name, time })), ...l].slice(0, 30))
+            popup.success(`Checked in: ${res.attendance_marked.join(', ')}`)
             onAttendance?.()
           }
         }
       } catch (e) {
-        if (!cancelled) setError(e.message)
+        if (!cancelled) popup.error(e.message)
       }
       if (!cancelled) timer = setTimeout(tick, FRAME_GAP_MS)
     }
 
     timer = setTimeout(tick, 400)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [running, cam.active, cam.capture, onAttendance])
+  }, [running, cam.active, cam.capture, onAttendance, popup])
+
+  useEffect(() => { if (cam.error) popup.error(cam.error) }, [cam.error, popup])
 
   const start = async () => {
-    setError('')
     if (await cam.start()) setRunning(true)
   }
 
@@ -115,7 +117,6 @@ export default function LivePanel({ peopleCount, goToPeople, onAttendance }) {
               </span>
             )}
           </div>
-          {(cam.error || error) && <p className="alert">{cam.error || error}</p>}
         </div>
 
         <aside className="live-side">

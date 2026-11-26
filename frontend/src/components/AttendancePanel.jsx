@@ -1,32 +1,34 @@
 import { useCallback, useEffect, useState } from 'react'
 import { addDays, api, formatTime, localDay } from '../api'
+import { usePopup } from './Popup'
 
 export default function AttendancePanel({ refreshKey, goToLive }) {
   const today = localDay()
   const [day, setDay] = useState(today)
   const [data, setData] = useState(null)
-  const [error, setError] = useState('')
+  const popup = usePopup()
   const [start, setStart] = useState(addDays(today, -29))
   const [end, setEnd] = useState(today)
 
   const load = useCallback(async () => {
     try {
       setData(await api.attendance(day))
-      setError('')
     } catch (e) {
-      setError(e.message)
+      popup.error(e.message)
     }
-  }, [day])
+  }, [day, popup])
 
   useEffect(() => { load() }, [load, refreshKey])
 
   const remove = async (record) => {
-    if (!window.confirm(`Remove ${record.name}'s check-in for this day?`)) return
+    const ok = await popup.confirm({ title: 'Remove check-in?', message: `${record.name} will be marked absent for this day.`, confirmText: 'Remove', danger: true })
+    if (!ok) return
     try {
       await api.deleteAttendance(record.id)
+      popup.success(`${record.name}'s check-in removed.`)
       load()
     } catch (e) {
-      setError(e.message)
+      popup.error(e.message)
     }
   }
 
@@ -52,7 +54,6 @@ export default function AttendancePanel({ refreshKey, goToLive }) {
         <button className="btn ghost small" onClick={load}>↻ Refresh</button>
       </div>
 
-      {error && <p className="alert">{error}</p>}
 
       {data && (
         <>

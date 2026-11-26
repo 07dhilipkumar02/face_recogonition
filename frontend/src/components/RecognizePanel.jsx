@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api'
 import ImageInput from './ImageInput'
+import { usePopup } from './Popup'
 import FaceOverlay from './FaceOverlay'
 
 export default function RecognizePanel({ peopleCount, goToPeople, onAttendance }) {
@@ -8,18 +9,22 @@ export default function RecognizePanel({ peopleCount, goToPeople, onAttendance }
   const [markAttendance, setMarkAttendance] = useState(false)
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const popup = usePopup()
 
-  const change = (img) => { setImage(img); setResult(null); setError('') }
+  const change = (img) => { setImage(img); setResult(null) }
 
   const run = async () => {
-    setLoading(true); setError('')
+    setLoading(true)
     try {
       const res = await api.recognize(image.file, { attendance: markAttendance })
       setResult(res)
-      if (res.attendance_marked.length) onAttendance?.()
+      if (res.attendance_marked.length) {
+        popup.success(`Checked in: ${res.attendance_marked.join(', ')}`)
+        onAttendance?.()
+      }
+      if (res.count === 0) popup.info('No faces found in this photo.')
     } catch (e) {
-      setError(e.message)
+      popup.error(e.message)
     } finally {
       setLoading(false)
     }
@@ -58,16 +63,12 @@ export default function RecognizePanel({ peopleCount, goToPeople, onAttendance }
           <button className="btn primary block" disabled={!image || loading} onClick={run}>
             {loading ? <span className="spinner" /> : 'Recognise faces'}
           </button>
-          {error && <p className="alert">{error}</p>}
         </div>
 
         <div className="results">
           {!result && !loading && <p className="placeholder">Matches will appear here.</p>}
           {loading && <p className="placeholder">Recognising…</p>}
           {result && result.count === 0 && <p className="placeholder">No faces detected.</p>}
-          {result?.attendance_marked.length > 0 && (
-            <p className="alert ok">Checked in: {result.attendance_marked.join(', ')}</p>
-          )}
           {result?.faces.map((f, i) => (
             <div className={`card match ${f.matched ? 'ok' : 'bad'}`} key={i}>
               <div className="card-title">

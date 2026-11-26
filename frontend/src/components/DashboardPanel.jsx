@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, formatDateTime } from '../api'
 import { BarList, ColumnChart } from './Charts'
+import { usePopup } from './Popup'
 
 const KIND_LABEL = { analyze: 'Analysis', recognize: 'Recognition', verify: 'Verification' }
 
@@ -23,30 +24,40 @@ export default function DashboardPanel({ refreshKey }) {
   const [stats, setStats] = useState(null)
   const [history, setHistory] = useState([])
   const [kind, setKind] = useState('')
-  const [error, setError] = useState('')
+  const [loadFailed, setLoadFailed] = useState(false)
+  const popup = usePopup()
 
   const load = useCallback(async () => {
     try {
       const [s, h] = await Promise.all([api.stats(), api.history(kind || undefined, 30)])
-      setStats(s); setHistory(h); setError('')
+      setStats(s); setHistory(h); setLoadFailed(false)
     } catch (e) {
-      setError(e.message)
+      setLoadFailed(true)
+      popup.error(e.message)
     }
-  }, [kind])
+  }, [kind, popup])
 
   useEffect(() => { load() }, [load, refreshKey])
 
   const removeItem = async (id) => {
-    try { await api.deleteHistory(id); load() } catch (e) { setError(e.message) }
+    try { await api.deleteHistory(id); load() } catch (e) { popup.error(e.message) }
   }
 
   const clearAll = async () => {
-    if (!window.confirm('Clear all history? Dashboard charts based on history will reset.')) return
-    try { await api.clearHistory(); load() } catch (e) { setError(e.message) }
+    const ok = await popup.confirm({ title: 'Clear all history?', message: 'Dashboard charts based on history will reset. This cannot be undone.', confirmText: 'Clear history', danger: true })
+    if (!ok) return
+    try { await api.clearHistory(); popup.success('History cleared.'); load() } catch (e) { popup.error(e.message) }
   }
 
-  if (error && !stats) return <section className="panel"><p className="alert">{error}</p></section>
-  if (!stats) return <section className="panel"><p className="placeholder">Loading dashboard…</p></section>
+  if (!stats) {
+    return (
+      <section className="panel">
+        <p className="placeholder">
+          {loadFailed ? <>Couldn't load the dashboard. <button className="link" onClick={load}>Try again</button></> : 'Loading dashboard…'}
+        </p>
+      </section>
+    )
+  }
 
   const t = stats.totals
   const tiles = [
@@ -81,7 +92,6 @@ export default function DashboardPanel({ refreshKey }) {
         </div>
         <button className="btn ghost small" onClick={load}>↻ Refresh</button>
       </header>
-      {error && <p className="alert">{error}</p>}
 
       <div className="tiles">
         {tiles.map(([label, value]) => (

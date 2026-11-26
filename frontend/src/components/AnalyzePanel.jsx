@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api'
 import ImageInput from './ImageInput'
+import { usePopup } from './Popup'
 import FaceOverlay from './FaceOverlay'
 
 const EMOJI = {
@@ -12,16 +13,16 @@ export default function AnalyzePanel() {
   const [image, setImage] = useState(null)
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const popup = usePopup()
 
-  const change = (img) => { setImage(img); setResult(null); setError('') }
+  const change = (img) => { setImage(img); setResult(null) }
 
   const run = async () => {
-    setLoading(true); setError('')
+    setLoading(true)
     try {
       setResult(await api.analyze(image.file))
     } catch (e) {
-      setError(e.message)
+      popup.error(e.message)
     } finally {
       setLoading(false)
     }
@@ -47,7 +48,6 @@ export default function AnalyzePanel() {
           <button className="btn primary block" disabled={!image || loading} onClick={run}>
             {loading ? <span className="spinner" /> : 'Analyse faces'}
           </button>
-          {error && <p className="alert">{error}</p>}
         </div>
 
         <div className="results">

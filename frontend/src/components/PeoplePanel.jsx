@@ -2,19 +2,22 @@ import { useEffect, useState } from 'react'
 import { api, formatDateTime } from '../api'
 import MultiImageInput from './MultiImageInput'
 import PersonModal from './PersonModal'
+import { usePopup } from './Popup'
 
 export default function PeoplePanel({ onChange }) {
   const [people, setPeople] = useState([])
   const [query, setQuery] = useState('')
   const [openId, setOpenId] = useState(null)
-  const [listError, setListError] = useState('')
+  const [loadFailed, setLoadFailed] = useState(false)
+  const popup = usePopup()
 
   const load = async (q = query) => {
     try {
       setPeople(await api.people(q))
-      setListError('')
+      setLoadFailed(false)
     } catch (e) {
-      setListError(e.message)
+      setLoadFailed(true)
+      popup.error(e.message)
     }
   }
 
@@ -49,8 +52,7 @@ export default function PeoplePanel({ onChange }) {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          {listError && <p className="alert">{listError}</p>}
-          {!people.length && !listError && (
+          {!people.length && !loadFailed && (
             <p className="placeholder">{query ? 'No one matches that search.' : 'No one registered yet.'}</p>
           )}
           <div className="people-grid">
@@ -92,16 +94,15 @@ function RegisterForm({ onDone }) {
   const [name, setName] = useState('')
   const [photos, setPhotos] = useState([])
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
   const [results, setResults] = useState([])
+  const popup = usePopup()
 
   const submit = async (e) => {
     e.preventDefault()
-    setLoading(true); setError(''); setSuccess(''); setResults([])
+    setLoading(true); setResults([])
     try {
       const res = await api.registerPerson(name, photos.map((p) => p.file))
-      setSuccess(
+      popup.success(
         res.merged
           ? `Added ${res.added} photo${res.added === 1 ? '' : 's'} to ${res.person.name}.`
           : `${res.person.name} registered with ${res.added} photo${res.added === 1 ? '' : 's'}.`
@@ -111,7 +112,7 @@ function RegisterForm({ onDone }) {
       setName(''); setPhotos([])
       onDone()
     } catch (err) {
-      setError(err.message)
+      popup.error(err.message)
     } finally {
       setLoading(false)
     }
@@ -124,12 +125,10 @@ function RegisterForm({ onDone }) {
         <span>Name</span>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Abhi" maxLength={60} required />
       </label>
-      <MultiImageInput value={photos} onChange={(v) => { setPhotos(v); setError('') }} />
+      <MultiImageInput value={photos} onChange={setPhotos} />
       <button className="btn primary block" disabled={!name.trim() || !photos.length || loading}>
         {loading ? <span className="spinner" /> : `Register${photos.length ? ` with ${photos.length} photo${photos.length === 1 ? '' : 's'}` : ''}`}
       </button>
-      {error && <p className="alert">{error}</p>}
-      {success && <p className="alert ok">{success}</p>}
       <Results results={results} />
     </form>
   )
@@ -137,19 +136,21 @@ function RegisterForm({ onDone }) {
 
 function BulkRegister({ onDone }) {
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
   const [summary, setSummary] = useState(null)
+  const popup = usePopup()
 
   const upload = async (fileList) => {
     const files = [...fileList].filter((f) => f.type.startsWith('image/'))
     if (!files.length) return
-    setLoading(true); setError(''); setSummary(null)
+    setLoading(true); setSummary(null)
     try {
       const res = await api.bulkRegister(files)
       setSummary(res)
+      if (res.people.length) popup.success(`Registered ${res.people.map((p) => `${p.name} (${p.added})`).join(', ')}.`)
+      else popup.error('No one could be registered from those photos.')
       onDone()
     } catch (err) {
-      setError(err.message)
+      popup.error(err.message)
     } finally {
       setLoading(false)
     }
@@ -174,17 +175,7 @@ function BulkRegister({ onDone }) {
         </label>
         {loading && <span className="muted small"><span className="spinner dark" /> Processing…</span>}
       </div>
-      {error && <p className="alert">{error}</p>}
-      {summary && (
-        <>
-          <p className="alert ok">
-            {summary.people.length
-              ? `Registered ${summary.people.map((p) => `${p.name} (${p.added})`).join(', ')}.`
-              : 'No one could be registered from those photos.'}
-          </p>
-          <Results results={summary.results} />
-        </>
-      )}
+      {summary && <Results results={summary.results} />}
     </div>
   )
 }

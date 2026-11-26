@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { usePopup } from './Popup'
 
 /**
  * Pick an image by upload, drag-and-drop, or webcam snapshot.
@@ -10,7 +11,7 @@ export default function ImageInput({ value, onChange, label = 'Upload a photo', 
   const streamRef = useRef(null)
   const [dragging, setDragging] = useState(false)
   const [camera, setCamera] = useState(false)
-  const [camError, setCamError] = useState('')
+  const popup = usePopup()
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -27,7 +28,6 @@ export default function ImageInput({ value, onChange, label = 'Upload a photo', 
   }
 
   const startCamera = async () => {
-    setCamError('')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
       streamRef.current = stream
@@ -36,7 +36,7 @@ export default function ImageInput({ value, onChange, label = 'Upload a photo', 
         if (videoRef.current) videoRef.current.srcObject = stream
       })
     } catch {
-      setCamError('Camera not available or permission denied.')
+      popup.error('Camera not available or permission denied.')
     }
   }
 
@@ -96,7 +96,6 @@ export default function ImageInput({ value, onChange, label = 'Upload a photo', 
       >
         📷 Use webcam
       </button>
-      {camError && <p className="error-text">{camError}</p>}
       <input
         ref={fileRef}
         type="file"

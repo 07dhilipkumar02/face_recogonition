@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import useCamera from '../hooks/useCamera'
+import { usePopup } from './Popup'
 
 let nextId = 0
 
@@ -11,6 +12,9 @@ export default function MultiImageInput({ value, onChange, max = 20, label = 'Ad
   const fileRef = useRef(null)
   const cam = useCamera()
   const [dragging, setDragging] = useState(false)
+  const popup = usePopup()
+
+  useEffect(() => { if (cam.error) popup.error(cam.error) }, [cam.error, popup])
 
   const add = (files) => {
     const imgs = [...files].filter((f) => f.type.startsWith('image/'))
@@ -57,7 +61,6 @@ export default function MultiImageInput({ value, onChange, max = 20, label = 'Ad
           <button type="button" className="btn ghost small" onClick={(e) => { e.stopPropagation(); cam.start() }}>
             📷 Use webcam
           </button>
-          {cam.error && <p className="error-text">{cam.error}</p>}
           <input
             ref={fileRef}
             type="file"

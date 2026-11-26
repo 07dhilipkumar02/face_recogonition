@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { api, formatDateTime, formatTime } from '../api'
 import MultiImageInput from './MultiImageInput'
+import { usePopup } from './Popup'
 
 export default function PersonModal({ id, onClose, onChange }) {
   const [person, setPerson] = useState(null)
-  const [error, setError] = useState('')
+  const [loadFailed, setLoadFailed] = useState(false)
+  const popup = usePopup()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')
   const [photos, setPhotos] = useState([])
@@ -16,7 +18,8 @@ export default function PersonModal({ id, onClose, onChange }) {
       const p = await api.person(id)
       setPerson(p); setName(p.name)
     } catch (e) {
-      setError(e.message)
+      setLoadFailed(true)
+      popup.error(e.message)
     }
   }
 
@@ -28,14 +31,15 @@ export default function PersonModal({ id, onClose, onChange }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const act = async (fn) => {
-    setBusy(true); setError('')
+  const act = async (fn, successMessage) => {
+    setBusy(true)
     try {
       await fn()
       await load()
       onChange()
+      if (successMessage) popup.success(successMessage)
     } catch (e) {
-      setError(e.message)
+      popup.error(e.message)
     } finally {
       setBusy(false)
     }
@@ -43,7 +47,7 @@ export default function PersonModal({ id, onClose, onChange }) {
 
   const rename = (e) => {
     e.preventDefault()
-    act(async () => { await api.renamePerson(id, name); setEditing(false) })
+    act(async () => { await api.renamePerson(id, name); setEditing(false) }, `Renamed to ${name.trim()}.`)
   }
 
   const upload = () => act(async () => {
@@ -52,18 +56,29 @@ export default function PersonModal({ id, onClose, onChange }) {
     setPhotos([])
     setNotes(res.results.filter((r) => !r.ok || r.warning).map((r) => `${r.file}: ${r.ok ? r.warning : r.error}`))
     if (!res.added) throw new Error('None of those photos could be used.')
+    popup.success(`Added ${res.added} photo${res.added === 1 ? '' : 's'}.`)
   })
 
-  const removePhoto = (sid) => act(() => api.deletePhoto(id, sid))
+  const removePhoto = async (sid) => {
+    const ok = await popup.confirm({ title: 'Delete this photo?', message: 'It will no longer be used to recognise this person.', confirmText: 'Delete', danger: true })
+    if (ok) act(() => api.deletePhoto(id, sid), 'Photo deleted.')
+  }
 
   const removePerson = async () => {
-    if (!window.confirm(`Delete ${person.name} and all their photos? Their past attendance records are kept.`)) return
+    const ok = await popup.confirm({
+      title: `Delete ${person.name}?`,
+      message: 'All their photos are removed. Past attendance records are kept.',
+      confirmText: 'Delete person',
+      danger: true,
+    })
+    if (!ok) return
     setBusy(true)
     try {
       await api.deletePerson(id)
+      popup.success(`${person.name} deleted.`)
       onChange(); onClose()
     } catch (e) {
-      setError(e.message); setBusy(false)
+      popup.error(e.message); setBusy(false)
     }
   }
 
@@ -72,8 +87,7 @@ export default function PersonModal({ id, onClose, onChange }) {
       <div className="modal" role="dialog" aria-modal="true" aria-label={person?.name || 'Person'}>
         <button className="modal-close" onClick={onClose} aria-label="Close">✕</button>
 
-        {!person && !error && <p className="placeholder">Loading…</p>}
-        {error && <p className="alert">{error}</p>}
+        {!person && <p className="placeholder">{loadFailed ? 'Could not load this person.' : 'Loading…'}</p>}
 
         {person && (
           <>

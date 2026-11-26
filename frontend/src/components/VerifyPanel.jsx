@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api'
 import ImageInput from './ImageInput'
+import { usePopup } from './Popup'
 import FaceOverlay from './FaceOverlay'
 
 export default function VerifyPanel() {
@@ -8,16 +9,16 @@ export default function VerifyPanel() {
   const [img2, setImg2] = useState(null)
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const popup = usePopup()
 
-  const reset = (setter) => (v) => { setter(v); setResult(null); setError('') }
+  const reset = (setter) => (v) => { setter(v); setResult(null) }
 
   const run = async () => {
-    setLoading(true); setError('')
+    setLoading(true)
     try {
       setResult(await api.verify(img1.file, img2.file))
     } catch (e) {
-      setError(e.message)
+      popup.error(e.message)
     } finally {
       setLoading(false)
     }
@@ -44,7 +45,6 @@ export default function VerifyPanel() {
       <button className="btn primary block" disabled={!img1 || !img2 || loading} onClick={run}>
         {loading ? <span className="spinner" /> : 'Compare faces'}
       </button>
-      {error && <p className="alert">{error}</p>}
 
       {result && (
         <div className={`verdict ${result.verified ? 'ok' : 'bad'}`}>
