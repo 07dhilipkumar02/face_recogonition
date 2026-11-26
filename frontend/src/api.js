@@ -1,4 +1,5 @@
-const BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+// accepts https://x.onrender.com or https://x.onrender.com/api
+const BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '').replace(/\/api$/, '')
 
 async function request(path, options = {}) {
   let res
