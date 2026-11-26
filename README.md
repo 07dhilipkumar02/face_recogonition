@@ -12,7 +12,9 @@ A face recognition web app built with **Python, OpenCV, DeepFace and React**. It
 | **Attendance** | One check-in per person per day (first and last seen), a present/absent view by date, and CSV export for Excel |
 | **Dashboard** | Totals, attendance and activity for the last 7 days, emotion, age and gender charts, and a recent-activity history |
 
-**Tech:** FastAPI · DeepFace (Facenet512 embeddings, OpenCV detector) · TensorFlow · SQLite · React 18 · Vite
+**Tech:** FastAPI · OpenCV DNN (YuNet detection, SFace recognition, MobileFaceNet emotion, InsightFace age/gender) · SQLite · React 18 · Vite
+
+No TensorFlow: the backend uses about 370 MB of RAM, so it runs on Render's free plan. The models (about 45 MB) download automatically on first start, or ahead of time with `python download_models.py`.
 
 ```
 face_recognition/
@@ -92,7 +94,7 @@ Open http://localhost:5173. Vite forwards `/api` to the backend automatically.
 
 ## Deploy
 
-**The backend will not run on Hostinger shared hosting or Vercel.** It needs a Python server with about 2 GB RAM, because TensorFlow and the models use about 1.5 GB when loaded.
+**Backend → Render (free plan works).** It uses about 370 MB of RAM at peak. Deploy `backend/` as a Docker web service, or as a Python service with build command `pip install -r requirements.txt && python download_models.py` and start command `uvicorn app:app --host 0.0.0.0 --port $PORT`. Set `ALLOWED_ORIGINS` to your frontend URL. Free instances sleep when idle and their disk is wiped on redeploy, so registered people are not permanent.
 
 - **Backend → Hugging Face Spaces (free, 16 GB RAM):** create a Space, choose the **Docker** SDK, and upload the `backend/` folder. The Dockerfile downloads the weights at build time and serves on port 7860. Your API URL is `https://<user>-<space>.hf.space`.
   Free Spaces sleep when idle, and registered faces reset on restart unless you add persistent storage.

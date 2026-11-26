@@ -1,5 +1,5 @@
 """
-Face Recognition & DeepFace System - FastAPI backend (v2).
+Face Recognition System - FastAPI backend (v3, OpenCV models, low memory).
 
 Storage: one SQLite file (data/face_system.db) holding people, their face
 samples (embeddings), attendance records and analysis history.
@@ -41,15 +41,15 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from deepface import DeepFace
+import face_engine
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 # ----------------------------------------------------------------- config ---
-MODEL_NAME = os.getenv("MODEL_NAME", "Facenet512")
-DETECTOR = os.getenv("DETECTOR", "opencv")          # opencv | ssd | mtcnn | retinaface
+MODEL_NAME = face_engine.MODEL_NAME     # SFace embeddings (OpenCV), no TensorFlow
+DETECTOR = face_engine.DETECTOR_NAME    # YuNet face detector (OpenCV)
 MAX_SIDE = int(os.getenv("MAX_IMAGE_SIDE", "1280"))  # photos are scaled down for speed
 LIVE_MAX_SIDE = int(os.getenv("LIVE_MAX_SIDE", "640"))
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "8"))
@@ -58,28 +58,46 @@ HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "500"))
 DATA_DIR = Path(os.getenv("DATA_DIR", Path(__file__).parent / "data"))
 DB_FILE = DATA_DIR / "face_system.db"
 LEGACY_JSON = DATA_DIR / "faces.json"
-ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",")]
+# comma-separated; "https://site.vercel.app/" and "https://site.vercel.app" both work
+ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()] or ["*"]
 
-# Cosine-distance thresholds DeepFace uses for each model
-THRESHOLDS = {
-    "VGG-Face": 0.68, "Facenet": 0.40, "Facenet512": 0.30, "ArcFace": 0.68,
-    "Dlib": 0.07, "SFace": 0.593, "OpenFace": 0.10, "DeepFace": 0.23,
-    "DeepID": 0.015, "GhostFaceNet": 0.65,
-}
-THRESHOLD = float(os.getenv("MATCH_THRESHOLD", THRESHOLDS.get(MODEL_NAME, 0.40)))
+# cosine distance (1 - similarity); lower MATCH_THRESHOLD = stricter matching
+THRESHOLD = float(os.getenv("MATCH_THRESHOLD", face_engine.DEFAULT_THRESHOLD))
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-_model_lock = threading.Lock()   # TensorFlow models are not safe to call concurrently
+_engine = None
+_engine_lock = threading.Lock()
+
+
+def engine() -> "face_engine.FaceEngine":
+    global _engine
+    if _engine is None:
+        with _engine_lock:
+            if _engine is None:
+                _engine = face_engine.FaceEngine()
+    return _engine
+
+
 _write_lock = threading.Lock()
 
 
 @asynccontextmanager
 async def lifespan(_app):
     init_db()
+    threading.Thread(target=_warm_up, daemon=True).start()
     yield
 
 
-app = FastAPI(title="Face Recognition & DeepFace API", version="2.0.0", lifespan=lifespan)
+def _warm_up():
+    """Download/load models in the background, then re-embed photos saved by an older model."""
+    try:
+        engine()
+        migrate_embeddings()
+    except Exception as e:  # keep serving; the first request will retry and report the error
+        print("Model warm-up failed:", e, flush=True)
+
+
+app = FastAPI(title="Face Recognition API", version="3.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -278,18 +296,43 @@ def area(face: dict) -> int:
 
 
 def embed_faces(img: np.ndarray) -> list[dict]:
-    """Return [{embedding, region}] for every face found (empty list if none)."""
-    try:
-        with _model_lock:
-            reps = DeepFace.represent(
-                img, model_name=MODEL_NAME, detector_backend=DETECTOR, enforce_detection=True
-            )
-    except ValueError:  # DeepFace raises ValueError when no face is detected
-        return []
+    """Return [{embedding, region, score}] for every face found (empty list if none)."""
+    eng = engine()
     return [
-        {"embedding": np.asarray(r["embedding"], dtype=np.float32), "region": region_of(r["facial_area"])}
-        for r in reps
+        {"embedding": eng.embed(img, f), "region": f["region"], "score": f["score"]}
+        for f in eng.detect(img)
     ]
+
+
+def migrate_embeddings() -> None:
+    """Photos registered with a different model (e.g. DeepFace) are re-embedded from their thumbnails."""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT id, thumbnail FROM samples WHERE model != ? AND thumbnail IS NOT NULL", (MODEL_NAME,)
+        ).fetchall()
+    if not rows:
+        return
+    updated = 0
+    for r in rows:
+        try:
+            raw = base64.b64decode(r["thumbnail"].split(",", 1)[1])
+            img = decode_image(raw)
+            # thumbnails are tight crops; add a border so the detector sees the whole head
+            img = cv2.copyMakeBorder(img, 40, 40, 40, 40, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+            faces = embed_faces(img)
+        except Exception:
+            continue
+        if faces:
+            emb = max(faces, key=area)["embedding"]
+            with _write_lock, db() as conn:
+                conn.execute(
+                    "UPDATE samples SET model = ?, embedding = ? WHERE id = ?",
+                    (MODEL_NAME, json.dumps(emb.tolist()), r["id"]),
+                )
+            updated += 1
+    if updated:
+        invalidate_index()
+    print(f"Re-embedded {updated}/{len(rows)} saved photos with {MODEL_NAME}", flush=True)
 
 
 def cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
@@ -379,28 +422,10 @@ def health():
 @app.post("/api/analyze")
 async def analyze(image: UploadFile = File(...), save: bool = Form(True)):
     img = await read_image(image)
-    try:
-        with _model_lock:
-            results = DeepFace.analyze(
-                img,
-                actions=["age", "gender", "emotion"],
-                detector_backend=DETECTOR,
-                enforce_detection=True,
-                silent=True,
-            )
-    except ValueError:
-        results = []
+    eng = engine()
     faces = [
-        {
-            "region": region_of(r["region"]),
-            "age": int(r["age"]),
-            "gender": r["dominant_gender"],
-            "gender_scores": r["gender"],
-            "emotion": r["dominant_emotion"],
-            "emotion_scores": r["emotion"],
-            "confidence": r.get("face_confidence"),
-        }
-        for r in results
+        {"region": f["region"], "confidence": f["score"], **eng.analyze(img, f)}
+        for f in eng.detect(img)
     ]
     if save:
         add_history("analyze", img, len(faces), {
